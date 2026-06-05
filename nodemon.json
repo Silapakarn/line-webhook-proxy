@@ -1,0 +1,6 @@
+{
+    "watch": ["src"],
+    "ext": "ts,tsx,yaml",
+    "exec": "ts-node ./src/cmd/start.ts",
+    "ignore": ["src/**/*.test.ts", "node_modules", "dist"]
+}

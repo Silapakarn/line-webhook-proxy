@@ -1,0 +1,13 @@
+version: "3.9"
+services:
+  line-webhook-proxy:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - ENVIRONMENT=local
+      - PORT=3000
+      - LINE_CHANNEL_SECRET=${LINE_CHANNEL_SECRET}
+      - LINE_CHANNEL_ACCESS_TOKEN=${LINE_CHANNEL_ACCESS_TOKEN}
+      - DOWNSTREAM_URL=${DOWNSTREAM_URL:-http://localhost:3001/webhook}
+      - DOWNSTREAM_TIMEOUT_MS=${DOWNSTREAM_TIMEOUT_MS:-5000}
