@@ -10,11 +10,14 @@ export interface LineConfig {
 export interface DownstreamConfig {
   url: string;
   timeoutMs: number;
+  retryAttempts: number;
+  retryBaseDelayMs: number;
 }
 
 interface Config {
   line: LineConfig;
   downstream: DownstreamConfig;
+  serviceADownstream: DownstreamConfig;
 }
 
 enum EnvironmentVariable {
@@ -22,6 +25,12 @@ enum EnvironmentVariable {
   LINE_CHANNEL_ACCESS_TOKEN = 'LINE_CHANNEL_ACCESS_TOKEN',
   DOWNSTREAM_URL = 'DOWNSTREAM_URL',
   DOWNSTREAM_TIMEOUT_MS = 'DOWNSTREAM_TIMEOUT_MS',
+  DOWNSTREAM_RETRY_ATTEMPTS = 'DOWNSTREAM_RETRY_ATTEMPTS',
+  DOWNSTREAM_RETRY_BASE_DELAY_MS = 'DOWNSTREAM_RETRY_BASE_DELAY_MS',
+  SERVICE_A_DOWNSTREAM_URL = 'SERVICE_A_DOWNSTREAM_URL',
+  SERVICE_A_DOWNSTREAM_TIMEOUT_MS = 'SERVICE_A_DOWNSTREAM_TIMEOUT_MS',
+  SERVICE_A_DOWNSTREAM_RETRY_ATTEMPTS = 'SERVICE_A_DOWNSTREAM_RETRY_ATTEMPTS',
+  SERVICE_A_DOWNSTREAM_RETRY_BASE_DELAY_MS = 'SERVICE_A_DOWNSTREAM_RETRY_BASE_DELAY_MS',
 }
 
 export class ConfigService {
@@ -39,6 +48,14 @@ export class ConfigService {
         downstream: {
           url: this._getEnv(EnvironmentVariable.DOWNSTREAM_URL) ?? 'http://localhost:3001/webhook',
           timeoutMs: _.toNumber(this._getEnv(EnvironmentVariable.DOWNSTREAM_TIMEOUT_MS)) || 5000,
+          retryAttempts: _.toNumber(this._getEnv(EnvironmentVariable.DOWNSTREAM_RETRY_ATTEMPTS)) || 3,
+          retryBaseDelayMs: _.toNumber(this._getEnv(EnvironmentVariable.DOWNSTREAM_RETRY_BASE_DELAY_MS)) || 100,
+        },
+        serviceADownstream: {
+          url: this._getEnv(EnvironmentVariable.SERVICE_A_DOWNSTREAM_URL) ?? 'http://localhost:3002/webhook',
+          timeoutMs: _.toNumber(this._getEnv(EnvironmentVariable.SERVICE_A_DOWNSTREAM_TIMEOUT_MS)) || 5000,
+          retryAttempts: _.toNumber(this._getEnv(EnvironmentVariable.SERVICE_A_DOWNSTREAM_RETRY_ATTEMPTS)) || 3,
+          retryBaseDelayMs: _.toNumber(this._getEnv(EnvironmentVariable.SERVICE_A_DOWNSTREAM_RETRY_BASE_DELAY_MS)) || 100,
         },
       };
     })();
@@ -66,9 +83,10 @@ export class ConfigService {
   }
 
   public getDownstreamConfig(): DownstreamConfig {
-    return {
-      url: this._configuration.downstream.url,
-      timeoutMs: this._configuration.downstream.timeoutMs,
-    };
+    return { ...this._configuration.downstream };
+  }
+
+  public getServiceADownstreamConfig(): DownstreamConfig {
+    return { ...this._configuration.serviceADownstream };
   }
 }

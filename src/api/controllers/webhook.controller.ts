@@ -1,5 +1,4 @@
 import { Router as ExpressRouter, Request, Response } from 'express';
-import correlator from 'express-correlation-id';
 import { WebhookService } from '../../application/webhook/webhook.service';
 import { logger } from '../../helpers/Logger/logger';
 import { lineSignatureMiddleware } from '../middlewares/line-signature.middleware';
@@ -34,13 +33,15 @@ export class WebhookController implements Router {
       bodyLength: req.body.length,
     });
 
-    const result = await this.webhookService.forward(req.body, req.headers);
+    const results = await this.webhookService.forward(req.body, req.headers);
 
     logger.info({
       event: 'webhook.completed',
-      downstream: result.downstream,
-      downstreamStatus: result.status,
-      latencyMs: result.latencyMs,
+      downstreams: results.map((r) => ({
+        downstream: r.downstream,
+        status: r.status,
+        latencyMs: r.latencyMs,
+      })),
     });
 
     res.status(200).json({ success: true });
