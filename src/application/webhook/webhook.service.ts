@@ -1,7 +1,7 @@
 import { IncomingHttpHeaders } from 'http';
 import { IDownstreamAdapter } from '../interface/downstream.adapter.interface';
 import { logger } from '../../helpers/Logger/logger';
-import { WebhookStatus, WebhookForwardResult } from 'src/domain/webhook';
+import { WebhookStatus, WebhookForwardModel } from 'src/domain/webhook';
 
 export class WebhookService {
   private readonly adapterNames: string[];
@@ -10,13 +10,14 @@ export class WebhookService {
     this.adapterNames = downstreamAdapters.map((a) => a.name);
   }
 
-  async forward(rawBody: string, originalHeaders: IncomingHttpHeaders): Promise<WebhookForwardResult[]> {
+  async forward(rawBody: string, originalHeaders: IncomingHttpHeaders): Promise<WebhookForwardModel> {
 
+    // in production grade we use Kafka/RabbitMQ to forward the webhook
     const results = await Promise.allSettled(
       this.downstreamAdapters.map((adapter) => adapter.forward(rawBody, originalHeaders)),
     );
 
-    return results.map((result, i) => {
+    const forwardResults = results.map((result, i) => {
       const adapterName = this.adapterNames[i];
 
       if (result.status === WebhookStatus.FULFILLED) {
@@ -31,5 +32,7 @@ export class WebhookService {
 
       return { downstream: adapterName, status: 0, latencyMs: 0 };
     });
+
+    return new WebhookForwardModel(forwardResults);
   }
 }

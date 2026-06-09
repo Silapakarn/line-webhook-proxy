@@ -1,23 +1,13 @@
 import _ from 'lodash';
-import { CiscoDownstreamAdapter } from '../../infrastructures/adapters/cisco-downstream.adapter';
-import { ServiceADownstreamAdapter } from '../../infrastructures/adapters/service-a-downstream.adapter';
+import { DownstreamAdapter } from '../../infrastructures/adapters/downstream.adapter';
 import { WebhookService } from '../../application/webhook/webhook.service';
 import { WebhookController } from '../controllers/webhook.controller';
 import { ConfigService } from 'src/config/service';
 
 export enum ProviderName {
-  // Config
   CONFIG_SERVICE = 'config',
-
-  // Controller
   WEBHOOK_CONTROLLER = 'controller.webhook',
-
-  // Service
   WEBHOOK_SERVICE = 'service.webhook',
-
-  // Adapter
-  CISCO_DOWNSTREAM_ADAPTER = 'adapter.ciscoDownstream',
-  SERVICE_A_DOWNSTREAM_ADAPTER = 'adapter.serviceADownstream',
 }
 
 export default class Container {
@@ -30,19 +20,16 @@ export default class Container {
     // Config
     const configService = new ConfigService();
 
-    // Adapter
-    const ciscoAdapter = new CiscoDownstreamAdapter(configService.getDownstreamConfig());
-    const serviceAAdapter = new ServiceADownstreamAdapter(configService.getServiceADownstreamConfig());
+    // Adapters — one instance per downstream config entry
+    const downstreamAdapters = configService.getDownstreamConfigs().map((c) => new DownstreamAdapter(c));
 
     // Service
-    const webhookService = new WebhookService([ciscoAdapter, serviceAAdapter]);
+    const webhookService = new WebhookService(downstreamAdapters);
 
     // Controller
     const webhookController = new WebhookController(webhookService);
 
     registerInstance(ProviderName.CONFIG_SERVICE, configService);
-    registerInstance(ProviderName.CISCO_DOWNSTREAM_ADAPTER, ciscoAdapter);
-    registerInstance(ProviderName.SERVICE_A_DOWNSTREAM_ADAPTER, serviceAAdapter);
     registerInstance(ProviderName.WEBHOOK_SERVICE, webhookService);
     registerInstance(ProviderName.WEBHOOK_CONTROLLER, webhookController);
 

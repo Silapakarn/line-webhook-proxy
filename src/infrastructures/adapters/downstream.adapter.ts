@@ -5,13 +5,14 @@ import { logger } from '../../helpers/Logger/logger';
 import { ErrorCode } from '../../helpers/enum/error-code';
 import { InternalError } from '../../helpers/errors/internal-error';
 
-export class CiscoDownstreamAdapter implements IDownstreamAdapter {
-  readonly name = 'cisco-mock-receiver';
+export class DownstreamAdapter implements IDownstreamAdapter {
+  readonly name: string;
 
   private readonly url: string;
   private readonly timeoutMs: number;
 
   constructor(config: DownstreamConfig) {
+    this.name = config.name;
     this.url = config.url;
     this.timeoutMs = config.timeoutMs;
   }
@@ -44,7 +45,7 @@ export class CiscoDownstreamAdapter implements IDownstreamAdapter {
       logger.error({
         errorCode: ErrorCode.FORWARDING_FAILED,
         description: `got an error when forwarding to downstream: ${this.name} | Error status: ${axiosError?.response?.status ?? axiosError?.code} | Error message: ${axiosError?.response?.data?.message ?? axiosError?.message}`,
-        location: 'ciscoDownstreamAdapter.forward',
+        location: 'downstreamAdapter.forward',
         latencyMs,
       });
 

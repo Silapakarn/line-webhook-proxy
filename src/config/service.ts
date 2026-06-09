@@ -8,16 +8,14 @@ export interface LineConfig {
 }
 
 export interface DownstreamConfig {
+  name: string;
   url: string;
   timeoutMs: number;
-  retryAttempts: number;
-  retryBaseDelayMs: number;
 }
 
 interface Config {
   line: LineConfig;
-  downstream: DownstreamConfig;
-  serviceADownstream: DownstreamConfig;
+  downstreams: DownstreamConfig[];
 }
 
 enum EnvironmentVariable {
@@ -25,12 +23,10 @@ enum EnvironmentVariable {
   LINE_CHANNEL_ACCESS_TOKEN = 'LINE_CHANNEL_ACCESS_TOKEN',
   DOWNSTREAM_URL = 'DOWNSTREAM_URL',
   DOWNSTREAM_TIMEOUT_MS = 'DOWNSTREAM_TIMEOUT_MS',
-  DOWNSTREAM_RETRY_ATTEMPTS = 'DOWNSTREAM_RETRY_ATTEMPTS',
-  DOWNSTREAM_RETRY_BASE_DELAY_MS = 'DOWNSTREAM_RETRY_BASE_DELAY_MS',
   SERVICE_A_DOWNSTREAM_URL = 'SERVICE_A_DOWNSTREAM_URL',
   SERVICE_A_DOWNSTREAM_TIMEOUT_MS = 'SERVICE_A_DOWNSTREAM_TIMEOUT_MS',
-  SERVICE_A_DOWNSTREAM_RETRY_ATTEMPTS = 'SERVICE_A_DOWNSTREAM_RETRY_ATTEMPTS',
-  SERVICE_A_DOWNSTREAM_RETRY_BASE_DELAY_MS = 'SERVICE_A_DOWNSTREAM_RETRY_BASE_DELAY_MS',
+  SERVICE_B_DOWNSTREAM_URL = 'SERVICE_B_DOWNSTREAM_URL',
+  SERVICE_B_DOWNSTREAM_TIMEOUT_MS = 'SERVICE_B_DOWNSTREAM_TIMEOUT_MS',
 }
 
 export class ConfigService {
@@ -39,35 +35,36 @@ export class ConfigService {
   constructor() {
     this._preload();
 
-    this._configuration = (() => {
-      return {
-        line: {
-          channelSecret: this._getEnv(EnvironmentVariable.LINE_CHANNEL_SECRET),
-          channelAccessToken: this._getEnv(EnvironmentVariable.LINE_CHANNEL_ACCESS_TOKEN),
-        },
-        downstream: {
+    this._configuration = {
+      line: {
+        channelSecret: this._getEnv(EnvironmentVariable.LINE_CHANNEL_SECRET),
+        channelAccessToken: this._getEnv(EnvironmentVariable.LINE_CHANNEL_ACCESS_TOKEN),
+      },
+      downstreams: [
+        {
+          name: 'cisco-mock-receiver',
           url: this._getEnv(EnvironmentVariable.DOWNSTREAM_URL) ?? 'http://localhost:3001/webhook',
           timeoutMs: _.toNumber(this._getEnv(EnvironmentVariable.DOWNSTREAM_TIMEOUT_MS)) || 5000,
-          retryAttempts: _.toNumber(this._getEnv(EnvironmentVariable.DOWNSTREAM_RETRY_ATTEMPTS)) || 3,
-          retryBaseDelayMs: _.toNumber(this._getEnv(EnvironmentVariable.DOWNSTREAM_RETRY_BASE_DELAY_MS)) || 100,
         },
-        serviceADownstream: {
+        {
+          name: 'service-a',
           url: this._getEnv(EnvironmentVariable.SERVICE_A_DOWNSTREAM_URL) ?? 'http://localhost:3002/webhook',
           timeoutMs: _.toNumber(this._getEnv(EnvironmentVariable.SERVICE_A_DOWNSTREAM_TIMEOUT_MS)) || 5000,
-          retryAttempts: _.toNumber(this._getEnv(EnvironmentVariable.SERVICE_A_DOWNSTREAM_RETRY_ATTEMPTS)) || 3,
-          retryBaseDelayMs: _.toNumber(this._getEnv(EnvironmentVariable.SERVICE_A_DOWNSTREAM_RETRY_BASE_DELAY_MS)) || 100,
         },
-      };
-    })();
+        {
+          name: 'service-b',
+          url: this._getEnv(EnvironmentVariable.SERVICE_B_DOWNSTREAM_URL) ?? 'http://localhost:3003/webhook',
+          timeoutMs: _.toNumber(this._getEnv(EnvironmentVariable.SERVICE_B_DOWNSTREAM_TIMEOUT_MS)) || 5000,
+        },
+      ],
+    };
   }
 
   private _preload() {
     const env = process.env.ENVIRONMENT ?? 'local';
-
-    const isInterestedEnv = ['local', 'integration-test'].some((interestedEnv) => interestedEnv === env);
+    const isInterestedEnv = ['local', 'integration-test'].includes(env);
     if (isInterestedEnv) {
-      const envFilePath = path.resolve(__dirname, `${env}.env`);
-      dotenv.config({ path: envFilePath, encoding: 'utf-8' });
+      dotenv.config({ path: path.resolve(__dirname, `${env}.env`), encoding: 'utf-8' });
     }
   }
 
@@ -76,17 +73,10 @@ export class ConfigService {
   }
 
   public getLineConfig(): LineConfig {
-    return {
-      channelSecret: this._configuration.line.channelSecret,
-      channelAccessToken: this._configuration.line.channelAccessToken,
-    };
+    return { ...this._configuration.line };
   }
 
-  public getDownstreamConfig(): DownstreamConfig {
-    return { ...this._configuration.downstream };
-  }
-
-  public getServiceADownstreamConfig(): DownstreamConfig {
-    return { ...this._configuration.serviceADownstream };
+  public getDownstreamConfigs(): DownstreamConfig[] {
+    return this._configuration.downstreams;
   }
 }

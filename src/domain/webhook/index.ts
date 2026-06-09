@@ -1,7 +1,7 @@
 import { WebhookForwardResult } from './webhook-forward-response';
+import { WebhookForwardModel } from './webhook-forward-model';
 import { WebhookStatus } from './webhook-enum';
-import { LineWebhookBody, LineEvent, LineDeliveryContext } from './line-webhook-body';
 
 export { WebhookForwardResult };
+export { WebhookForwardModel };
 export { WebhookStatus };
-export { LineWebhookBody, LineEvent, LineDeliveryContext };
