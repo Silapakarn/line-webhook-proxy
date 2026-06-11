@@ -16,7 +16,8 @@ export class WebhookController implements Router {
   public route(): ExpressRouter {
     const router = ExpressRouter();
 
-    router.post('/', lineSignatureMiddleware, webhookRequestValidator(), this.handle);
+    router.post('/power', lineSignatureMiddleware, webhookRequestValidator(), this.handle);
+    router.post('/chatshop', lineSignatureMiddleware, webhookRequestValidator(), this.handleTEST);
 
     return router;
   }
@@ -30,6 +31,7 @@ export class WebhookController implements Router {
         'x-forwarded-for': req.headers['x-forwarded-for'],
       },
       bodyLength: req.body.length,
+      userId: req.body?.events?.[0]?.source?.userId,
     });
 
     // if (TEST_SCENARIO === 'delay') {
@@ -43,6 +45,31 @@ export class WebhookController implements Router {
     //   logger.warn({ event: 'webhook.test.error', errorCode: ErrorCode.INTERNAL_ERROR, location: 'WebhookController.handle' });
     //   throw new InternalError({ code: ErrorCode.INTERNAL_ERROR, message: 'Simulated error for testing' });
     // }
+
+    const forwardModel = await this.webhookService.forward(req.body, req.headers);
+
+    logger.info({
+      event: 'webhook.completed',
+      allFailed: forwardModel.allFailed,
+      failedDownstreams: forwardModel.failedDownstreams,
+      successDownstreams: forwardModel.successDownstreams,
+    });
+
+    res.status(200).json({ success: true });
+  }
+
+
+   public async handleTEST(req: Request, res: Response): Promise<void> {
+    logger.info({
+      event: 'webhook.received',
+      headers: {
+        'content-type': req.headers['content-type'],
+        'x-line-signature': req.headers['x-line-signature'],
+        'x-forwarded-for': req.headers['x-forwarded-for'],
+      },
+      bodyLength: req.body.length,
+      userId: req.body?.events?.[0]?.source?.userId,
+    });
 
     const forwardModel = await this.webhookService.forward(req.body, req.headers);
 

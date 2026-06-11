@@ -5,7 +5,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node-dev --respawn --transpile-only src/index.ts"
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "script:fetch-follower-ids": "ts-node -r tsconfig-paths/register src/scripts/fetch-follower-ids.ts"
   },
   "dependencies": {
     "axios": "^1.7.0",
