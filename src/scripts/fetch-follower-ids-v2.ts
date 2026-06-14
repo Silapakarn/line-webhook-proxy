@@ -16,10 +16,10 @@ const lineClient = axios.create({
 const LINE_FOLLOWERS_URL = 'https://api.line.me/v2/bot/followers/ids';
 const OUTPUT_DIR = path.join(process.cwd(), 'output');
 const OUTPUT_FILE = path.join(OUTPUT_DIR, 'king_power_users.csv');
-const CHECKPOINT_FILE = path.join(OUTPUT_DIR, 'king_power_checkpoint.json');
+const CHECKPOINT_FILE = path.join(OUTPUT_DIR, 'king_power_progress.json');
 const TOKEN = process.env.KING_POWER_PROD_TOKEN ?? '';
-const PROGRESS_LOG_EVERY_N_PAGES = 100;
-const BATCH_SIZE = 1000;
+const BATCH_SIZE = 5000;
+const heapMemory = () => Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
 
 // ─── Checkpoint ────────────────────────────────────────────────────────────
 
@@ -29,7 +29,7 @@ interface Checkpoint {
   page: number;
 }
 
-function loadCheckpoint(): Checkpoint | null {
+function loadSavedProgress(): Checkpoint | null {
   if (!fs.existsSync(CHECKPOINT_FILE)) return null;
   return JSON.parse(fs.readFileSync(CHECKPOINT_FILE, 'utf-8')) as Checkpoint;
 }
@@ -68,93 +68,109 @@ class CsvStreamWriter {
   }
 }
 
-// ─── Async Generator ───────────────────────────────────────────────────────
+// ─── LineFollowerApiClient ─────────────────────────────────────────────────
 
-async function* fetchListFollowers(
-  token: string,
-  startCursor?: string,
-): AsyncGenerator<{ userIds: string[]; next?: string }> {
-  const getFollowers = (cursor?: string) =>
-    lineClient.get(LINE_FOLLOWERS_URL, {
-      headers: { Authorization: `Bearer ${token}` },
-      params: cursor ? { start: cursor } : {},
-    });
+class LineFollowerApiClient {
+  constructor(
+    private readonly token: string
+  ) {}
 
-  let nextRequest = getFollowers(startCursor);
+  async *fetchUserIds(startCursor?: string): AsyncGenerator<{ userIds: string[]; next?: string }> {
+    
+    const getPage = (cursor?: string) =>
+      lineClient.get(LINE_FOLLOWERS_URL, {
+        headers: { Authorization: `Bearer ${this.token}` },
+        params: cursor ? { start: cursor } : {},
+      });
 
-  while (true) {
-    const { data } = await nextRequest;
+    let nextRequest = getPage(startCursor);
 
-    if (data.next) nextRequest = getFollowers(data.next);
+    while (true) {
+      const { data } = await nextRequest;
 
-    yield { userIds: data.userIds, next: data.next };
+      if (data.next) nextRequest = getPage(data.next); // prefetch next page before yielding
 
-    if (!data.next) break;
+      yield { userIds: data.userIds, next: data.next };
+
+      if (!data.next) break;
+    }
   }
+}
+
+// ─── FollowerExportService ─────────────────────────────────────────────────
+
+class FollowerExportService {
+  private readonly apiClient: LineFollowerApiClient;
+  private readonly writer: CsvStreamWriter;
+  private readonly startTime = Date.now();
+  private readonly idsAtStart: number;
+  private totalIds: number;
+  private page: number;
+
+  constructor(private readonly saved: Checkpoint | null) {
+    this.apiClient = new LineFollowerApiClient(TOKEN);
+    this.totalIds = saved?.totalIds ?? 0;
+    this.page = saved?.page ?? 0;
+    this.idsAtStart = this.totalIds;
+    this.writer = new CsvStreamWriter(OUTPUT_FILE, saved !== null);
+  }
+
+  async run(): Promise<void> {
+    try {
+      for await (const { userIds, next } of this.apiClient.fetchUserIds(this.saved?.cursor)) {
+        this.writePage(userIds);
+        this.updateCheckpoint(next);
+
+        if (this.shouldPause(next)) break;
+      }
+    } finally {
+      await this.writer.close();
+    }
+
+
+    logger.info({
+      event:  !fs.existsSync(CHECKPOINT_FILE) ? 'fetch.complete' : 'fetch.paused',
+      totalPages: this.page,
+      totalUsers: this.totalIds,
+      thisRunIds: this.totalIds - this.idsAtStart,
+      heapMB: heapMemory(),
+      totalElapsedMs: Date.now() - this.startTime,
+      ...( !fs.existsSync(CHECKPOINT_FILE) ? 
+      { outputFile: OUTPUT_FILE } : 
+      { hint: 'Run again to continue from checkpoint' }),
+    });
+  }
+
+  private writePage(userIds: string[]): void {
+    this.writer.append(userIds);
+    this.totalIds += userIds.length;
+    this.page++;
+  }
+
+  private updateCheckpoint(next?: string): void {
+    if (next) {
+      saveCheckpoint({ cursor: next, totalIds: this.totalIds, page: this.page });
+    } else {
+      clearCheckpoint();
+    }
+  }
+
+  private shouldPause(next?: string): boolean {
+    return this.totalIds - this.idsAtStart >= BATCH_SIZE && !!next;
+  }
+
 }
 
 // ─── Export ────────────────────────────────────────────────────────────────
 
 async function exportFollowers(): Promise<void> {
-  const saved = loadCheckpoint();
-  const isResuming = saved !== null;
+  const saved = loadSavedProgress();
 
-  const writer = new CsvStreamWriter(OUTPUT_FILE, isResuming);
-  let page = saved?.page ?? 0;
-  let totalIds = saved?.totalIds ?? 0;
-  const idsAtStart = totalIds;
-
-  const scriptStart = Date.now();
-  let progressClock = Date.now();
-
-  if (isResuming) {
-    logger.info({ event: 'fetch.resuming', fromPage: page, fromTotalIds: totalIds });
+  if (saved) {
+    logger.info({ event: 'fetch.resuming', fromPage: saved.page, fromTotalIds: saved.totalIds });
   }
 
-  try {
-    for await (const { userIds, next } of fetchListFollowers(TOKEN, saved?.cursor)) {
-      writer.append(userIds);
-      totalIds += userIds.length;
-      page++;
-
-      if (next) {
-        saveCheckpoint({ cursor: next, totalIds, page });
-      } else {
-        clearCheckpoint();
-      }
-
-      if (page % PROGRESS_LOG_EVERY_N_PAGES === 0) {
-        const now = Date.now();
-        logger.info({
-          event: 'fetch.progress',
-          pagesCompleted: page,
-          totalSoFar: totalIds,
-          thisRunIds: totalIds - idsAtStart,
-          batchDurationMs: now - progressClock,
-          totalElapsedMs: now - scriptStart,
-        });
-        progressClock = now;
-      }
-
-      // Pause after BATCH_SIZE IDs — only if there are more pages left
-      if (totalIds - idsAtStart >= BATCH_SIZE && next) {
-        break;
-      }
-    }
-  } finally {
-    await writer.close();
-  }
-
-  const isDone = !fs.existsSync(CHECKPOINT_FILE);
-
-  logger.info({
-    event: isDone ? 'fetch.complete' : 'fetch.paused',
-    totalPages: page,
-    totalUsers: totalIds,
-    thisRunIds: totalIds - idsAtStart,
-    totalElapsedMs: Date.now() - scriptStart,
-    ...(isDone ? { outputFile: OUTPUT_FILE } : { hint: 'Run again to continue from checkpoint' }),
-  });
+  await new FollowerExportService(saved).run();
 }
 
 // ─── Main ──────────────────────────────────────────────────────────────────
@@ -169,7 +185,9 @@ async function main(): Promise<void> {
   }
 
   logger.info({ event: 'script.start' });
+
   await exportFollowers();
+
   logger.info({ event: 'script.done' });
 }
 
