@@ -19,9 +19,10 @@ interface FollowerIdsPage {
   next?: string;
 }
 
+
+
 // ─── CSV Stream Writer ──────────────────────────────────────────────────────
 // Streams directly to disk per page — never buffers the full ID list in memory.
-
 class CsvStreamWriter {
   private readonly stream: fs.WriteStream;
   private firstWrite = true;
@@ -45,17 +46,23 @@ class CsvStreamWriter {
   }
 }
 
+
+
+
+
+
+
+
 // ─── LINE Follower IDs Adapter ─────────────────────────────────────────────
 class LineFollowerIdsAdapter {
-  private static readonly URL = 'https://api.line.me/v2/bot/followers/ids';
+  private static readonly URL_GET_FOLLOWERS = 'https://api.line.me/v2/bot/followers/ids';
 
   constructor(
     private readonly channelName: string,
     private readonly token: string,
   ) { }
 
-  // Async generator — yields one page at a time so the caller can stream-write
-  // without holding the full result set in memory.
+  // Async generator — yields one page at a time so the caller can stream-write without holding the full result set in memory.
   async *fetchListFollowers(): AsyncGenerator<string[]> {
     let cursor: string;
     let page = 1;
@@ -75,9 +82,9 @@ class LineFollowerIdsAdapter {
     if (cursor) params.start = cursor; // ถ้ามีหน้าถัดไป ให้ส่งพารามิเตอร์ start ไปบอก LINE
 
     try {
-      const response = await axios.get<FollowerIdsPage>(LineFollowerIdsAdapter.URL, {
-        headers: { Authorization: `Bearer ${this.token}` },
-        params,
+      const response = await axios.get<FollowerIdsPage>(LineFollowerIdsAdapter.URL_GET_FOLLOWERS, {
+        headers: { Authorization: `Bearer ${this.token}` }, 
+        params: { ...params, limit: 1000 },
       });
       return response.data;
     } catch (err: unknown) {
@@ -103,7 +110,7 @@ class LineFollowerIdsAdapter {
 
 
 
-
+// --- Constants ───────────────────────────────────────────────────────────────
 
 const PROGRESS_LOG_EVERY_N_PAGES = 100;
 
@@ -116,23 +123,28 @@ class FollowerExportService {
 
     let totalIds = 0;
     let page = 0;
+    const scriptStart = Date.now();
+    let batchStart = Date.now();
 
     try {
-      // ลูปดึงหน้าข้อมูลแบบ Async Iteraterator แล้วเขียนลงไฟล์ทีละหน้า
+      // loop ดึงหน้าข้อมูลแบบ Async Iteraterator แล้วเขียนลงไฟล์ทีละหน้า
       for await (const pageIds of adapter.fetchListFollowers()) {
         writer.append(pageIds);  // เอาข้อมูลหน้านี้ส่งไปเขียนลงดิสก์ทันที
         totalIds += pageIds.length;
         page++;
 
-
         //  Log ทุกๆ 100 หน้า เพื่อให้รู้ว่าระบบยังทำงานอยู่ ไม่ได้ค้าง
         if (page % PROGRESS_LOG_EVERY_N_PAGES === 0) {
+          const now = Date.now();
           logger.info({
             event: 'service.export_progress',
             channel: channel.name,
             pagesCompleted: page,
             totalSoFar: totalIds,
+            batchDurationMs: now - batchStart,
+            totalElapsedMs: now - scriptStart,
           });
+          batchStart = now;
         }
       }
     } finally {
@@ -144,36 +156,9 @@ class FollowerExportService {
       channel: channel.name,
       totalPages: page,
       totalUsers: totalIds,
+      totalElapsedMs: Date.now() - scriptStart,
       outputFile: channel.outputFile,
     });
-  }
-
-
-  async exportAll(channels: ChannelConfig[]): Promise<void> {
-    logger.info({ event: 'service.export_start', channels: channels.map((c) => c.name) });
-
-
-    // รันการดึงข้อมูลของทุกแชนแนลไปพร้อมๆ กันแบบขนาน (Parallel) ** ทำจริงจะมี 2 channels
-    const results = await Promise.allSettled(channels.map((c) => this.exportChannel(c)));
-
-    let hasFailure = false;
-    results.forEach((result, i) => {
-      if (result.status === 'rejected') {
-        hasFailure = true;
-        logger.error({
-          event: 'service.export_failed',
-          channel: channels[i].name,
-          error: result.reason instanceof Error ? result.reason.message : String(result.reason),
-        });
-      }
-    });
-
-    if (hasFailure) {
-      logger.error({ event: 'service.export_done', status: 'partial_failure' });
-      process.exit(1);
-    }
-
-    logger.info({ event: 'service.export_done', status: 'success' });
   }
 }
 
@@ -193,13 +178,13 @@ function requireToken(envKey: string): string {
   return value;
 }
 
-const CHANNELS: ChannelConfig[] = [
+const CHANNELS: ChannelConfig =
   {
     name: 'king-power',
     token: requireToken('KING_POWER_PROD_TOKEN'),
     outputFile: path.join(OUTPUT_DIR, 'king_power_users.csv'),
-  },
-];
+  }
+
 
 
 
@@ -209,4 +194,4 @@ const CHANNELS: ChannelConfig[] = [
 // ─── Entry point ───────────────────────────────────────────────────────────
 
 const service = new FollowerExportService();
-service.exportAll(CHANNELS);
+service.exportChannel(CHANNELS);
