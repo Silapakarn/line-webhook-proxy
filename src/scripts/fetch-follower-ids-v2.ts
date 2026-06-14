@@ -19,6 +19,7 @@ const OUTPUT_FILE = path.join(OUTPUT_DIR, 'king_power_users.csv');
 const CHECKPOINT_FILE = path.join(OUTPUT_DIR, 'king_power_progress.json');
 const TOKEN = process.env.KING_POWER_PROD_TOKEN ?? '';
 const BATCH_SIZE = 5000;
+const LIMIT_PER_PAGE = 1000; // max allowed by LINE API — fewer pages = faster total time
 const heapMemory = () => Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
 
 // ─── Checkpoint ────────────────────────────────────────────────────────────
@@ -80,7 +81,7 @@ class LineFollowerApiClient {
     const getPage = (cursor?: string) =>
       lineClient.get(LINE_FOLLOWERS_URL, {
         headers: { Authorization: `Bearer ${this.token}` },
-        params: cursor ? { start: cursor } : {},
+        params: { limit: LIMIT_PER_PAGE, ...(cursor ? { start: cursor } : {}) },
       });
 
     let nextRequest = getPage(startCursor);

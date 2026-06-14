@@ -20,6 +20,7 @@ const OUTPUT_FILE = path.join(OUTPUT_DIR, 'king_power_users_v3.csv');
 const PROGRESS_FILE = path.join(OUTPUT_DIR, 'king_power_v3_progress.json');
 const TOKEN = process.env.KING_POWER_PROD_TOKEN ?? '';
 const BATCH_SIZE = 5000;
+const LIMIT_PER_PAGE = 1000
 const heapMemory = () => Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
 
 
@@ -87,7 +88,7 @@ class LineFollowerApiClient {
     while (true) {
       const { data } = await lineClient.get(API_GET_FOLLOWERS_URL, {
         headers: { Authorization: `Bearer ${this.token}` },
-        params: cursor ? { start: cursor } : {},
+        params: { limit: LIMIT_PER_PAGE, ...(cursor ? { start: cursor } : {}) },
       });
 
       userIds.push(...data.userIds);
