@@ -16,9 +16,9 @@ const lineClient = axios.create({
 const LINE_FOLLOWERS_URL = 'https://api.line.me/v2/bot/followers/ids';
 const OUTPUT_DIR = path.join(process.cwd(), 'output');
 const OUTPUT_FILE = path.join(OUTPUT_DIR, 'king_power_users.csv');
-const CHECKPOINT_FILE = path.join(OUTPUT_DIR, 'king_power_progress.json');
+const CHECKPOINT_FILE = path.join(OUTPUT_DIR, 'king_power_checkpoint.json');
 const TOKEN = process.env.KING_POWER_PROD_TOKEN ?? '';
-const BATCH_SIZE = 5000;
+const BATCH_SIZE = 10000;
 const LIMIT_PER_PAGE = 1000; // max allowed by LINE API — fewer pages = faster total time
 const heapMemory = () => Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
 
@@ -30,18 +30,24 @@ interface Checkpoint {
   page: number;
 }
 
-function loadSavedProgress(): Checkpoint | null {
-  if (!fs.existsSync(CHECKPOINT_FILE)) return null;
-  return JSON.parse(fs.readFileSync(CHECKPOINT_FILE, 'utf-8')) as Checkpoint;
+class CheckpointManager {
+  constructor(private readonly filePath: string) {}
+
+  load(): Checkpoint | null {
+    if (!fs.existsSync(this.filePath)) return null;
+    return JSON.parse(fs.readFileSync(this.filePath, 'utf-8')) as Checkpoint;
+  }
+
+  save(cp: Checkpoint): void {
+    fs.writeFileSync(this.filePath, JSON.stringify(cp));
+  }
+
+  clear(): void {
+    if (fs.existsSync(this.filePath)) fs.unlinkSync(this.filePath);
+  }
 }
 
-function saveCheckpoint(cp: Checkpoint): void {
-  fs.writeFileSync(CHECKPOINT_FILE, JSON.stringify(cp));
-}
-
-function clearCheckpoint(): void {
-  if (fs.existsSync(CHECKPOINT_FILE)) fs.unlinkSync(CHECKPOINT_FILE);
-}
+const checkpointManager = new CheckpointManager(CHECKPOINT_FILE);
 
 // ─── CsvStreamWriter ───────────────────────────────────────────────────────
 
@@ -150,9 +156,9 @@ class FollowerExportService {
 
   private updateCheckpoint(next?: string): void {
     if (next) {
-      saveCheckpoint({ cursor: next, totalIds: this.totalIds, page: this.page });
+      checkpointManager.save({ cursor: next, totalIds: this.totalIds, page: this.page });
     } else {
-      clearCheckpoint();
+      checkpointManager.clear();
     }
   }
 
@@ -165,10 +171,14 @@ class FollowerExportService {
 // ─── Export ────────────────────────────────────────────────────────────────
 
 async function exportFollowers(): Promise<void> {
-  const saved = loadSavedProgress();
+  const saved = checkpointManager.load();
 
   if (saved) {
-    logger.info({ event: 'fetch.resuming', fromPage: saved.page, fromTotalIds: saved.totalIds });
+    logger.info({ 
+      event: 'fetch.resuming', 
+      fromPage: saved.page, 
+      fromTotalIds: saved.totalIds 
+    });
   }
 
   await new FollowerExportService(saved).run();

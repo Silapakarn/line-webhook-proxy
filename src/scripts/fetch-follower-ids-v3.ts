@@ -17,33 +17,39 @@ const lineClient = axios.create({
 const API_GET_FOLLOWERS_URL = process.env.API_GET_FOLLOWERS_URL ?? 'https://api.line.me/v2/bot/followers/ids';
 const OUTPUT_DIR = path.join(process.cwd(), 'output');
 const OUTPUT_FILE = path.join(OUTPUT_DIR, 'king_power_users_v3.csv');
-const PROGRESS_FILE = path.join(OUTPUT_DIR, 'king_power_v3_progress.json');
+const CHECKPOINT_FILE = path.join(OUTPUT_DIR, 'king_power_v3_checkpoint.json');
 const TOKEN = process.env.KING_POWER_PROD_TOKEN ?? '';
-const BATCH_SIZE = 5000;
+const BATCH_SIZE = 100_000;
 const LIMIT_PER_PAGE = 1000
 const heapMemory = () => Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
 
 
 
-// ─── Progress ────────────────────────────────────────────────────────────
+// ─── Checkpoint ────────────────────────────────────────────────────────────
 
-interface Progress {
+interface Checkpoint {
   cursor?: string;
   totalUserIds: number;
 }
 
-function loadSavedProgress(): Progress | null {
-  if (!fs.existsSync(PROGRESS_FILE)) return null;
-  return JSON.parse(fs.readFileSync(PROGRESS_FILE, 'utf-8')) as Progress;
+class CheckpointManager {
+  constructor(private readonly filePath: string) {}
+
+  load(): Checkpoint | null {
+    if (!fs.existsSync(this.filePath)) return null;
+    return JSON.parse(fs.readFileSync(this.filePath, 'utf-8')) as Checkpoint;
+  }
+
+  save(cp: Checkpoint): void {
+    fs.writeFileSync(this.filePath, JSON.stringify(cp));
+  }
+
+  clear(): void {
+    if (fs.existsSync(this.filePath)) fs.unlinkSync(this.filePath);
+  }
 }
 
-function saveProgress(progress: Progress): void {
-  fs.writeFileSync(PROGRESS_FILE, JSON.stringify(progress));
-}
-
-function clearProgress(): void {
-  if (fs.existsSync(PROGRESS_FILE)) fs.unlinkSync(PROGRESS_FILE);
-}
+const checkpointManager = new CheckpointManager(CHECKPOINT_FILE);
 
 
 
@@ -93,7 +99,6 @@ class LineFollowerApiClient {
 
       userIds.push(...data.userIds);
 
-      // If we've collected enough for one batch, or there are no more pages, return what we have so far.
       if (userIds.length >= BATCH_SIZE || !data.next) {
         return { userIds, nextCursor: data.next };
       }
@@ -103,72 +108,108 @@ class LineFollowerApiClient {
   }
 }
 
+
+
+// ─── BatchProcessor ────────────────────────────────────────────────────────
+
+interface BatchProcessResult {
+  nextCursor?: string;
+  fetchedIds: number;
+  isDone: boolean;
+}
+
+class BatchProcessor {
+  constructor(
+    private readonly apiClient: LineFollowerApiClient,
+    private readonly writer: CsvBatchWriter,
+  ) {}
+
+  async process(
+    cursor: string | undefined,
+    batchNumber: number,
+    totalUserIds: number,
+    startTime: number,
+  ): Promise<BatchProcessResult> {
+    logger.info({ 
+      event: 'fetch.batch_start', 
+      batchNumber, 
+      totalUserIdsSoFar: totalUserIds 
+    });
+
+    const { userIds, nextCursor } = await this.apiClient.fetchOneBatch(cursor);
+    this.writer.writeFile(userIds);
+
+
+    logger.info({
+      event: 'fetch.batch_done',
+      batchNumber,
+      totalUserIds: totalUserIds + userIds.length,
+      heapMB: heapMemory(),
+      totalElapsedMs: Date.now() - startTime,
+      ...(nextCursor ? { hint: 'Run again to continue' } : 
+        { outputFile: OUTPUT_FILE }),
+    });
+
+    return { 
+      nextCursor, 
+      fetchedIds: userIds.length, 
+      isDone: !nextCursor 
+    };
+  }
+}
+
+
+
 // ─── FollowerExportService ─────────────────────────────────────────────────
 
 class FollowerExportService {
-  private readonly apiClient: LineFollowerApiClient;
-  private readonly writer: CsvBatchWriter;
+  private readonly batch: BatchProcessor;
   private readonly startTime = Date.now();
   private totalUserIds: number;
   private cursor: string | undefined;
   private batchNumber = 0;
 
-  constructor(saved: Progress | null) {
-    this.apiClient = new LineFollowerApiClient(TOKEN);
-    this.totalUserIds = saved?.totalUserIds ?? 0;
-    this.cursor = saved?.cursor;
-    this.writer = new CsvBatchWriter(OUTPUT_FILE, saved !== null);
+  constructor(checkpoint: Checkpoint | null) {
+    this.totalUserIds = checkpoint?.totalUserIds ?? 0;
+    this.cursor = checkpoint?.cursor;
+    this.batch = new BatchProcessor(
+      new LineFollowerApiClient(TOKEN),
+      new CsvBatchWriter(OUTPUT_FILE, checkpoint !== null),
+    );
   }
 
-  
   async run(): Promise<void> {
-    let isDone: boolean = false;
-    while (!isDone) {
-      isDone = await this.processBatch();
-    }
-
-    logger.info({
-      event: 'fetch.complete',
-      totalUserIds: this.totalUserIds,
-      totalElapsedMs: Date.now() - this.startTime,
-      outputFile: OUTPUT_FILE,
-    });
-  }
-
-
-
-  private async processBatch(): Promise<boolean> {
     this.batchNumber++;
-    logger.info({
-      event: 'fetch.batch_start',
-      batchNumber: this.batchNumber,
-      totalUserIdsSoFar: this.totalUserIds,
-    });
 
-    const { userIds, nextCursor } = await this.apiClient.fetchOneBatch(this.cursor);
-    this.writer.writeFile(userIds);
-    this.totalUserIds += userIds.length;
+    const { nextCursor, fetchedIds, isDone } = await this.batch.process(
+      this.cursor,
+      this.batchNumber,
+      this.totalUserIds,
+      this.startTime,
+    );
+
+    this.totalUserIds += fetchedIds;
     this.cursor = nextCursor;
+    this.updateCheckpoint(nextCursor);
 
-    this.updateProgress(nextCursor);
-
-    logger.info({
-      event: 'fetch.batch_done',
-      batchNumber: this.batchNumber,
-      totalUserIds: this.totalUserIds,
-      heapMB: heapMemory(),
-      totalElapsedMs: Date.now() - this.startTime,
-      ...(nextCursor ? { hint: 'Run again to continue' } : { outputFile: OUTPUT_FILE }),
-    });
-
-    return !nextCursor; // true = last page, stop the loop
+    if (isDone) {
+      logger.info({
+        event: 'fetch.complete',
+        totalUserIds: this.totalUserIds,
+        totalElapsedMs: Date.now() - this.startTime,
+        outputFile: OUTPUT_FILE,
+      });
+    }
   }
 
-  private updateProgress(nextCursor?: string): void {
+  private updateCheckpoint(nextCursor?: string): void {
     if (nextCursor) {
-      saveProgress({ cursor: nextCursor, totalUserIds: this.totalUserIds });
+      checkpointManager.save({ 
+        cursor: nextCursor, 
+        totalUserIds: this.totalUserIds 
+      });
     } else {
-      clearProgress();
+      checkpointManager.clear();
     }
   }
 }
@@ -179,16 +220,16 @@ class FollowerExportService {
 // ─── Export ────────────────────────────────────────────────────────────────
 
 async function exportFollowerIds(): Promise<void> {
-  const saved = loadSavedProgress();
+  const checkpoint = checkpointManager.load();
 
-  if (saved) {
+  if (checkpoint) {
     logger.info({ 
       event: 'fetch.resuming', 
-      fromTotalUserIds: saved.totalUserIds 
+      fromTotalUserIds: checkpoint.totalUserIds 
     });
   }
 
-  await new FollowerExportService(saved).run();
+  await new FollowerExportService(checkpoint).run();
 }
 
 
@@ -212,9 +253,7 @@ async function main(): Promise<void> {
   
   await exportFollowerIds();
 
-  logger.info({ 
-    event: 'script.done' 
-  });
+  logger.info({ event: 'script.done' });
 }
 
 main();
