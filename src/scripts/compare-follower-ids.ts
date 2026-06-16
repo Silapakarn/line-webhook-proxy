@@ -6,9 +6,10 @@ import { logger } from '../helpers/Logger/logger';
 
 const OUTPUT_DIR = path.join(process.cwd(), 'output');
 
-const KING_POWER_FILE   = path.join(OUTPUT_DIR, 'king_power_users.csv');
-const CHAT_TO_SHOP_FILE = path.join(OUTPUT_DIR, 'chat_to_shop_users.csv');
+const KING_POWER_FILE   = path.join(OUTPUT_DIR, 'king_power_users_v3.csv');
+const CHAT_TO_SHOP_FILE = path.join(OUTPUT_DIR, 'chat_to_shop_users_v3.csv');
 const OVERLAP_FILE      = path.join(OUTPUT_DIR, 'overlap_users.csv');
+const ONLY_CTS_FILE     = path.join(OUTPUT_DIR, 'only_chat_to_shop_users.csv');
 
 // ─── Reader ────────────────────────────────────────────────────────────────
 
@@ -70,6 +71,12 @@ function main(): void {
     fs.mkdirSync(OUTPUT_DIR, { recursive: true });
     fs.writeFileSync(OVERLAP_FILE, overlap.join('\n'), 'utf-8');
     logger.info({ event: 'compare.overlap_saved', outputFile: OVERLAP_FILE });
+  }
+
+  if (onlyCTS.length > 0) {
+    fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+    fs.writeFileSync(ONLY_CTS_FILE, onlyCTS.join('\n'), 'utf-8');
+    logger.info({ event: 'compare.only_chat_to_shop_saved', outputFile: ONLY_CTS_FILE });
   }
 
   logger.info({ event: 'compare.done' });

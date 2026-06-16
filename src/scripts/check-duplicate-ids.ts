@@ -5,9 +5,7 @@ import { logger } from '../helpers/Logger/logger';
 // ─── Config ────────────────────────────────────────────────────────────────
 
 const OUTPUT_DIR = path.join(process.cwd(), 'output');
-const TARGET_FILE = process.argv[2]
-  ? path.resolve(process.argv[2])
-  : path.join(OUTPUT_DIR, 'king_power_users_v3.csv');
+const TARGET_FILE = path.join(OUTPUT_DIR, 'king_power_users_v3.csv');
 
 const DUPLICATE_REPORT_FILE = path.join(OUTPUT_DIR, 'duplicate_ids_report_(king_power).csv');
 
