@@ -8,7 +8,9 @@
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "script:fetch-follower-ids": "ts-node -r tsconfig-paths/register src/scripts/fetch-follower-ids.ts",
     "script:fetch-follower-ids-v2": "ts-node -r tsconfig-paths/register src/scripts/fetch-follower-ids-v2.ts",
-    "script:fetch-follower-ids-v3": "ts-node -r tsconfig-paths/register src/scripts/fetch-follower-ids-v3.ts"
+    "script:fetch-follower-ids-v3": "ts-node -r tsconfig-paths/register src/scripts/fetch-follower-ids-v3.ts",
+    "script:compare-follower-ids": "ts-node -r tsconfig-paths/register src/scripts/compare-follower-ids.ts",
+    "script:check-duplicate-ids": "ts-node -r tsconfig-paths/register src/scripts/check-duplicate-ids.ts"
   },
   "dependencies": {
     "axios": "^1.7.0",
