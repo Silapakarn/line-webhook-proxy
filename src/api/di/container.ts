@@ -5,7 +5,6 @@ import { KafkaService } from '../../application/kafka/kafka.service';
 import { WebhookService } from '../../application/webhook/webhook.service';
 import { WebhookController } from '../controllers/webhook.controller';
 import { ConfigService } from '../../config/service';
-import { ProxySigningService } from '../../helpers/proxy-signing.service';
 
 export enum ProviderName {
   CONFIG_SERVICE = 'config',
@@ -33,16 +32,11 @@ export default class Container {
     const producer: Producer = kafka.producer();
     await producer.connect();
 
-    // Proxy signing — consumers verify x-proxy-signature instead of x-line-signature
-    const signingService = new ProxySigningService(
-      process.env.PROXY_SIGNING_KEY ?? (() => { throw new Error('PROXY_SIGNING_KEY is required'); })(),
-    );
-
     // One KafkaAdapter per topic — adapter.name is used for logging
     const adapters = {
-      message:  new KafkaAdapter(producer, kafkaConfig.topics.message,  kafkaConfig.topics.message,  signingService),
-      postback: new KafkaAdapter(producer, kafkaConfig.topics.postback, kafkaConfig.topics.postback, signingService),
-      fallback: new KafkaAdapter(producer, kafkaConfig.topics.fallback, kafkaConfig.topics.fallback, signingService),
+      message:  new KafkaAdapter(producer, kafkaConfig.topics.message,  kafkaConfig.topics.message),
+      postback: new KafkaAdapter(producer, kafkaConfig.topics.postback, kafkaConfig.topics.postback),
+      fallback: new KafkaAdapter(producer, kafkaConfig.topics.fallback, kafkaConfig.topics.fallback),
     };
 
     const kafkaService = new KafkaService(adapters);

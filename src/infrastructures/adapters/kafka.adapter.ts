@@ -3,14 +3,12 @@ import { logger } from '../../helpers/Logger/logger';
 import { ErrorCode } from '../../helpers/enum/error-code';
 import { InternalError } from '../../helpers/errors/internal-error';
 import { ForwardHeaders, IKafkaAdapter, KafkaAdapterResult } from '../../domain/kafka/kafka-model';
-import { ProxySigningService } from '../../helpers/proxy-signing.service';
 
 export class KafkaAdapter implements IKafkaAdapter {
   constructor(
     private readonly producer: Producer,
     private readonly topic: string,
     readonly name: string,
-    private readonly signingService: ProxySigningService,
   ) {}
 
   async forward(rawBody: string, headers: ForwardHeaders): Promise<KafkaAdapterResult> {
@@ -24,7 +22,7 @@ export class KafkaAdapter implements IKafkaAdapter {
         messages: [
           {
             value: rawBody,
-            headers: this._buildHeaders(rawBody, headers),
+            headers: headers,
           },
         ],
       });
@@ -54,25 +52,5 @@ export class KafkaAdapter implements IKafkaAdapter {
         message: `failed to produce to topic: ${this.topic} (${error instanceof Error ? error.message : String(error)})`,
       });
     }
-  }
-
-  /**
-   * Preserve all original LINE headers so consumers receive exactly what LINE sent.
-   * Add x-proxy-signature so consumers verify origin is the proxy, not LINE directly.
-   * This means consumers NEVER need LINE_CHANNEL_SECRET.
-   */
-  private _buildHeaders(rawBody: string, headers: ForwardHeaders): Record<string, string> {
-    const result: Record<string, string> = {};
-
-    // Preserve all original headers from LINE
-    for (const [key, value] of Object.entries(headers)) {
-      if (value === undefined) continue;
-      result[key] = Array.isArray(value) ? value[0] : value;
-    }
-
-    // Inject proxy signature — consumers use this to validate the message came from us
-    result['x-proxy-signature'] = this.signingService.sign(rawBody);
-
-    return result;
   }
 }
