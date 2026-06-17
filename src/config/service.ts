@@ -1,32 +1,38 @@
 import path from 'path';
 import dotenv from 'dotenv';
-import _ from 'lodash';
 
 export interface LineConfig {
   channelSecret: string;
   channelAccessToken: string;
 }
 
-export interface DownstreamConfig {
-  name: string;
-  url: string;
-  timeoutMs: number;
+export interface KafkaTopics {
+  message: string;   // LINE message events  → line.message
+  postback: string;  // LINE postback events → line.postback
+  fallback: string;  // everything else      → line.event
+}
+
+export interface KafkaConfig {
+  brokers: string[];
+  topics: KafkaTopics;
+  clientId: string;
 }
 
 interface Config {
   line: LineConfig;
-  downstreams: DownstreamConfig[];
+  kafka: KafkaConfig;
 }
 
 enum EnvironmentVariable {
   LINE_CHANNEL_SECRET = 'LINE_CHANNEL_SECRET',
   LINE_CHANNEL_ACCESS_TOKEN = 'LINE_CHANNEL_ACCESS_TOKEN',
-  DOWNSTREAM_URL = 'DOWNSTREAM_URL',
-  DOWNSTREAM_TIMEOUT_MS = 'DOWNSTREAM_TIMEOUT_MS',
-  SERVICE_A_DOWNSTREAM_URL = 'SERVICE_A_DOWNSTREAM_URL',
-  SERVICE_A_DOWNSTREAM_TIMEOUT_MS = 'SERVICE_A_DOWNSTREAM_TIMEOUT_MS',
-  SERVICE_B_DOWNSTREAM_URL = 'SERVICE_B_DOWNSTREAM_URL',
-  SERVICE_B_DOWNSTREAM_TIMEOUT_MS = 'SERVICE_B_DOWNSTREAM_TIMEOUT_MS',
+
+  // Kafka
+  KAFKA_BROKERS = 'KAFKA_BROKERS',
+  KAFKA_TOPIC_MESSAGE = 'KAFKA_TOPIC_MESSAGE',
+  KAFKA_TOPIC_POSTBACK = 'KAFKA_TOPIC_POSTBACK',
+  KAFKA_TOPIC_FALLBACK = 'KAFKA_TOPIC_FALLBACK',
+  KAFKA_CLIENT_ID = 'KAFKA_CLIENT_ID',
 }
 
 export class ConfigService {
@@ -40,23 +46,15 @@ export class ConfigService {
         channelSecret: this._getEnv(EnvironmentVariable.LINE_CHANNEL_SECRET),
         channelAccessToken: this._getEnv(EnvironmentVariable.LINE_CHANNEL_ACCESS_TOKEN),
       },
-      downstreams: [
-        {
-          name: 'cisco-mock-receiver',
-          url: this._getEnv(EnvironmentVariable.DOWNSTREAM_URL) ?? 'http://localhost:3001/webhook',
-          timeoutMs: _.toNumber(this._getEnv(EnvironmentVariable.DOWNSTREAM_TIMEOUT_MS)) || 5000,
+      kafka: {
+        brokers: (this._getEnv(EnvironmentVariable.KAFKA_BROKERS)).split(','),
+        topics: {
+          message:  this._getEnv(EnvironmentVariable.KAFKA_TOPIC_MESSAGE),
+          postback: this._getEnv(EnvironmentVariable.KAFKA_TOPIC_POSTBACK),
+          fallback: this._getEnv(EnvironmentVariable.KAFKA_TOPIC_FALLBACK),
         },
-        {
-          name: 'service-a',
-          url: this._getEnv(EnvironmentVariable.SERVICE_A_DOWNSTREAM_URL) ?? 'http://localhost:3002/webhook',
-          timeoutMs: _.toNumber(this._getEnv(EnvironmentVariable.SERVICE_A_DOWNSTREAM_TIMEOUT_MS)) || 5000,
-        },
-        {
-          name: 'service-b',
-          url: this._getEnv(EnvironmentVariable.SERVICE_B_DOWNSTREAM_URL) ?? 'http://localhost:3003/webhook',
-          timeoutMs: _.toNumber(this._getEnv(EnvironmentVariable.SERVICE_B_DOWNSTREAM_TIMEOUT_MS)) || 5000,
-        },
-      ],
+        clientId: this._getEnv(EnvironmentVariable.KAFKA_CLIENT_ID),
+      },
     };
   }
 
@@ -76,7 +74,7 @@ export class ConfigService {
     return { ...this._configuration.line };
   }
 
-  public getDownstreamConfigs(): DownstreamConfig[] {
-    return this._configuration.downstreams;
+  public getKafkaConfig(): KafkaConfig {
+    return { ...this._configuration.kafka };
   }
 }

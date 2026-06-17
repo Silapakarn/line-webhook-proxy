@@ -1,38 +1,35 @@
 import { IncomingHttpHeaders } from 'http';
-import { IDownstreamAdapter } from '../interface/downstream.adapter.interface';
+import { KafkaService } from '../kafka/kafka.service';
 import { logger } from '../../helpers/Logger/logger';
-import { WebhookStatus, WebhookForwardModel } from 'src/domain/webhook';
 
 export class WebhookService {
-  private readonly adapterNames: string[];
+  constructor(private readonly kafkaService: KafkaService) {}
 
-  constructor(private readonly downstreamAdapters: IDownstreamAdapter[]) {
-    this.adapterNames = downstreamAdapters.map((a) => a.name);
-  }
-
-  async forward(rawBody: string, originalHeaders: IncomingHttpHeaders): Promise<WebhookForwardModel> {
-
-    // in production grade we use Kafka/RabbitMQ to forward the webhook
+  async forward(rawBody: string, headers: IncomingHttpHeaders): Promise<void> {
+    const events = this._parseEvents(rawBody);
+ 
     const results = await Promise.allSettled(
-      this.downstreamAdapters.map((adapter) => adapter.forward(rawBody, originalHeaders)),
+      events.map((event) => this.kafkaService.publish(event.type, rawBody, headers)),
     );
 
-    const forwardResults = results.map((result, i) => {
-      const adapterName = this.adapterNames[i];
-
-      if (result.status === WebhookStatus.FULFILLED) {
-        return { downstream: adapterName, status: result.value.status, latencyMs: result.value.latencyMs };
-      }
-
+    const failures = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+    if (failures.length > 0) {
       logger.error({
-        event: 'webhook.forward.failed',
-        downstream: adapterName,
-        error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+        event: 'webhook.publish.partial-failure',
+        total: results.length,
+        failed: failures.length,
+        reasons: failures.map((f) => (f.reason instanceof Error ? f.reason.message : String(f.reason))),
       });
+    }
+  }
 
-      return { downstream: adapterName, status: 0, latencyMs: 0 };
-    });
-
-    return new WebhookForwardModel(forwardResults);
+  private _parseEvents(rawBody: string): { type: string }[] | null {
+    try {
+      const parsed: { events?: { type: string }[] } = JSON.parse(rawBody);
+      return parsed.events ?? [];
+    } catch {
+      logger.warn({ event: 'webhook.parse.failed', reason: 'invalid JSON body' });
+      return null;
+    }
   }
 }

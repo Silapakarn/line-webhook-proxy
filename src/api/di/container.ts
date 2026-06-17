@@ -1,13 +1,17 @@
 import _ from 'lodash';
-import { DownstreamAdapter } from '../../infrastructures/adapters/downstream.adapter';
+import { Kafka, Producer } from 'kafkajs';
+import { KafkaAdapter } from '../../infrastructures/adapters/kafka.adapter';
+import { KafkaService } from '../../application/kafka/kafka.service';
 import { WebhookService } from '../../application/webhook/webhook.service';
 import { WebhookController } from '../controllers/webhook.controller';
-import { ConfigService } from 'src/config/service';
+import { ConfigService } from '../../config/service';
+import { ProxySigningService } from '../../helpers/proxy-signing.service';
 
 export enum ProviderName {
   CONFIG_SERVICE = 'config',
   WEBHOOK_CONTROLLER = 'controller.webhook',
   WEBHOOK_SERVICE = 'service.webhook',
+  KAFKA_PRODUCER = 'kafka.producer',
 }
 
 export default class Container {
@@ -17,19 +21,36 @@ export default class Container {
     const instance: any = {};
     const registerInstance = this.register(instance);
 
-    // Config
     const configService = new ConfigService();
+    const kafkaConfig = configService.getKafkaConfig();
 
-    // Adapters — one instance per downstream config entry
-    const downstreamAdapters = configService.getDownstreamConfigs().map((c) => new DownstreamAdapter(c));
+    const kafka = new Kafka({
+      clientId: kafkaConfig.clientId,
+      brokers: kafkaConfig.brokers,
+      retry: { initialRetryTime: 300, retries: 8 },
+    });
 
-    // Service
-    const webhookService = new WebhookService(downstreamAdapters);
+    const producer: Producer = kafka.producer();
+    await producer.connect();
 
-    // Controller
+    // Proxy signing — consumers verify x-proxy-signature instead of x-line-signature
+    const signingService = new ProxySigningService(
+      process.env.PROXY_SIGNING_KEY ?? (() => { throw new Error('PROXY_SIGNING_KEY is required'); })(),
+    );
+
+    // One KafkaAdapter per topic — adapter.name is used for logging
+    const adapters = {
+      message:  new KafkaAdapter(producer, kafkaConfig.topics.message,  kafkaConfig.topics.message,  signingService),
+      postback: new KafkaAdapter(producer, kafkaConfig.topics.postback, kafkaConfig.topics.postback, signingService),
+      fallback: new KafkaAdapter(producer, kafkaConfig.topics.fallback, kafkaConfig.topics.fallback, signingService),
+    };
+
+    const kafkaService = new KafkaService(adapters);
+    const webhookService = new WebhookService(kafkaService);
     const webhookController = new WebhookController(webhookService);
 
     registerInstance(ProviderName.CONFIG_SERVICE, configService);
+    registerInstance(ProviderName.KAFKA_PRODUCER, producer);
     registerInstance(ProviderName.WEBHOOK_SERVICE, webhookService);
     registerInstance(ProviderName.WEBHOOK_CONTROLLER, webhookController);
 

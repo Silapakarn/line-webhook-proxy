@@ -1,13 +1,211 @@
-version: "3.9"
+x-kafka-common: &kafka-common
+  image: apache/kafka:3.8.0
+  restart: unless-stopped
+
+x-consumer-common: &consumer-common
+  build:
+    context: .
+    dockerfile: Dockerfile.consumer
+  restart: unless-stopped
+  environment: &consumer-env
+    KAFKAJS_NO_PARTITIONER_WARNING: "1"
+    KAFKA_BROKERS: kafka-1:29092,kafka-2:29093,kafka-3:29094
+    CONSUMER_MAX_RETRIES: "5"
+    DOWNSTREAM_TIMEOUT_MS: "5000"
+
 services:
+
+  # ── Kafka Broker 1 ──────────────────────────
+  kafka-1:
+    <<: *kafka-common
+    container_name: kafka-1
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      CLUSTER_ID: m6otWfXjSra_4n_ML7WD1w
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_INTERNAL://0.0.0.0:29092,CONTROLLER://0.0.0.0:19093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka-1:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:19093,2@kafka-2:19093,3@kafka-3:19093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-broker-api-versions.sh", "--bootstrap-server", "localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ── Kafka Broker 2 ──────────────────────────
+  kafka-2:
+    <<: *kafka-common
+    container_name: kafka-2
+    ports:
+      - "9093:9093"
+    environment:
+      KAFKA_NODE_ID: 2
+      CLUSTER_ID: m6otWfXjSra_4n_ML7WD1w
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9093,PLAINTEXT_INTERNAL://0.0.0.0:29093,CONTROLLER://0.0.0.0:19093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9093,PLAINTEXT_INTERNAL://kafka-2:29093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:19093,2@kafka-2:19093,3@kafka-3:19093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-broker-api-versions.sh", "--bootstrap-server", "localhost:9093"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ── Kafka Broker 3 ──────────────────────────
+  kafka-3:
+    <<: *kafka-common
+    container_name: kafka-3
+    ports:
+      - "9094:9094"
+    environment:
+      KAFKA_NODE_ID: 3
+      CLUSTER_ID: m6otWfXjSra_4n_ML7WD1w
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9094,PLAINTEXT_INTERNAL://0.0.0.0:29094,CONTROLLER://0.0.0.0:19093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9094,PLAINTEXT_INTERNAL://kafka-3:29094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:19093,2@kafka-2:19093,3@kafka-3:19093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-broker-api-versions.sh", "--bootstrap-server", "localhost:9094"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ── Topic Init (runs once, exits) ────────────
+  kafka-init:
+    image: apache/kafka:3.8.0
+    container_name: kafka-init
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        echo "Creating topics..."
+
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server kafka-1:29092 \
+          --create --if-not-exists \
+          --topic line.message \
+          --partitions 6 --replication-factor 3
+
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server kafka-1:29092 \
+          --create --if-not-exists \
+          --topic line.postback \
+          --partitions 6 --replication-factor 3
+
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server kafka-1:29092 \
+          --create --if-not-exists \
+          --topic line.event \
+          --partitions 3 --replication-factor 3
+
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server kafka-1:29092 \
+          --create --if-not-exists \
+          --topic line.message-dlq \
+          --partitions 3 --replication-factor 3
+
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server kafka-1:29092 \
+          --create --if-not-exists \
+          --topic line.postback-dlq \
+          --partitions 3 --replication-factor 3
+
+        echo "Topics ready:"
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server kafka-1:29092 --list
+        echo "Done."
+
+  # ── Kafka UI (http://localhost:8080) ─────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - "8080:8080"
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local-poc
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-1:29092,kafka-2:29093,kafka-3:29094
+
+
+
+  # ── Proxy (producer) ─────────────────────────
   line-webhook-proxy:
     build: .
+    container_name: line-webhook-proxy
     ports:
       - "3000:3000"
+    restart: unless-stopped
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
     environment:
-      - ENVIRONMENT=local
-      - PORT=3000
-      - LINE_CHANNEL_SECRET=${LINE_CHANNEL_SECRET}
-      - LINE_CHANNEL_ACCESS_TOKEN=${LINE_CHANNEL_ACCESS_TOKEN}
-      - DOWNSTREAM_URL=${DOWNSTREAM_URL:-http://localhost:3001/webhook}
-      - DOWNSTREAM_TIMEOUT_MS=${DOWNSTREAM_TIMEOUT_MS:-5000}
+      NODE_ENV: production
+      PORT: 3000
+      KAFKAJS_NO_PARTITIONER_WARNING: "1"
+      LINE_CHANNEL_SECRET: ${LINE_CHANNEL_SECRET}
+      LINE_CHANNEL_ACCESS_TOKEN: ${LINE_CHANNEL_ACCESS_TOKEN}
+      KAFKA_BROKERS: kafka-1:29092,kafka-2:29093,kafka-3:29094
+      KAFKA_TOPIC_MESSAGE: line.message
+      KAFKA_TOPIC_POSTBACK: line.postback
+      KAFKA_TOPIC_FALLBACK: line.event
+      KAFKA_CLIENT_ID: line-webhook-proxy
+      PROXY_SIGNING_KEY: ${PROXY_SIGNING_KEY}
+
+  # ── Consumers ────────────────────────────────
+  # Downstream services run locally on your host machine.
+  # host.docker.internal resolves to your Mac's localhost from inside Docker.
+  consumer-cisco:
+    <<: *consumer-common
+    container_name: consumer-cisco
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *consumer-env
+      KAFKA_GROUP_ID: cisco-consumer
+      KAFKA_CLIENT_ID: cisco-consumer
+      KAFKA_TOPICS: line.message,line.postback
+      DOWNSTREAM_NAME: cisco
+      DOWNSTREAM_URL: http://host.docker.internal:3001/webhook
+      PROXY_SIGNING_KEY: ${PROXY_SIGNING_KEY}

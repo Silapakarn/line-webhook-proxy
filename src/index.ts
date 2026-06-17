@@ -3,7 +3,7 @@ import 'express-async-errors';
 import cors from 'cors';
 import express from 'express';
 import correlator from 'express-correlation-id';
-import Container from './api/di/container';
+import Container, { ProviderName } from './api/di/container';
 import { errorHandlerMiddleware } from './api/middlewares/error-handler.middleware';
 import router from './api/routes';
 
@@ -33,6 +33,19 @@ preload().then(({ container }) => {
   app.listen(port, () => {
     console.log(JSON.stringify({ event: 'server.started', port, service: 'line-webhook-proxy' }));
   });
+
+  const shutdown = async () => {
+    try {
+      const producer = container.getInstance(ProviderName.KAFKA_PRODUCER);
+      await producer.disconnect();
+    } catch {
+      // Kafka not enabled — nothing to disconnect
+    }
+    process.exit(0);
+  };
+
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 });
 
 export default app;
